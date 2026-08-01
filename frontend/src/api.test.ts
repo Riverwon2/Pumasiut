@@ -24,6 +24,19 @@ describe('parseSseChunk', () => {
     expect(result.events[0]?.type).toBe('result')
   })
 
+  it('keeps legacy result events without safety data from blanking the UI', () => {
+    const result = parseSseChunk(
+      'event: result\ndata: {"requestSummary":"요약","tasks":[],"assignments":[],"candidateQueues":[],"unassignedTaskIds":[]}\n\n',
+    )
+
+    expect(result.events[0]).toEqual(expect.objectContaining({
+      type: 'result',
+      data: expect.objectContaining({
+        safety: expect.objectContaining({ emergencyBlocked: false }),
+      }),
+    }))
+  })
+
   it('searches a confirmed mid task with existing candidates excluded', async () => {
     const task = {
       taskId: 'task-2',

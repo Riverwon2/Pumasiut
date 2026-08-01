@@ -8,6 +8,31 @@ import type {
 
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 
+const DEFAULT_SAFETY_SUMMARY: AssignmentPlan['safety'] = {
+  highestClassification: 'low',
+  emergencyBlocked: false,
+  highDiscardedCount: 0,
+  notActionableCount: 0,
+  midConfirmationCount: 0,
+}
+
+function normalizeAssignmentPlan(data: unknown): AssignmentPlan {
+  const plan = data as Partial<AssignmentPlan>
+  return {
+    requestSummary: typeof plan.requestSummary === 'string' ? plan.requestSummary : '',
+    tasks: Array.isArray(plan.tasks) ? plan.tasks : [],
+    assignments: Array.isArray(plan.assignments) ? plan.assignments : [],
+    candidateQueues: Array.isArray(plan.candidateQueues)
+      ? plan.candidateQueues.map((queue) => ({
+          ...queue,
+          candidates: Array.isArray(queue.candidates) ? queue.candidates : [],
+        }))
+      : [],
+    unassignedTaskIds: Array.isArray(plan.unassignedTaskIds) ? plan.unassignedTaskIds : [],
+    safety: plan.safety ?? DEFAULT_SAFETY_SUMMARY,
+  }
+}
+
 function decodeEvent(block: string): StreamEvent | null {
   const lines = block.split('\n')
   const eventName = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
@@ -23,7 +48,7 @@ function decodeEvent(block: string): StreamEvent | null {
     return { type: 'phase', data: data as { message: string } }
   }
   if (eventName === 'result') {
-    return { type: 'result', data: data as AssignmentPlan }
+    return { type: 'result', data: normalizeAssignmentPlan(data) }
   }
   if (eventName === 'error') {
     return { type: 'error', data: data as { message: string } }
