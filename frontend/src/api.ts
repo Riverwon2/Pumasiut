@@ -126,7 +126,7 @@ export async function matchConfirmedTask(
   })
 
   if (!response.ok) {
-    throw new Error('주의 요청의 도우미를 찾지 못했습니다.')
+    throw new Error('확인한 작업 시간으로 도우미를 찾지 못했습니다.')
   }
   return response.json() as Promise<TaskCandidateQueue>
 }

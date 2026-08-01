@@ -164,6 +164,10 @@ a:focus-visible {
 .safety-summary__item--caution strong { color: #936512; }
 .safety-summary__content { display: grid; gap: 3px; min-width: 0; }
 .safety-summary__content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-confirmation-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: end; margin-top: 7px; }
+.schedule-confirmation-fields > span { padding-bottom: 7px; font-weight: 900; }
+.schedule-confirmation-fields label { display: grid; gap: 3px; color: #7b6840; font-size: 9px; font-weight: 850; }
+.schedule-confirmation-fields input { width: 100%; min-height: 33px; padding: 5px 7px; border: 1px solid #d9bd78; border-radius: 8px; color: #493a1d; background: #fffdf7; font: inherit; }
 .safety-summary__action { min-height: 34px; padding: 7px 11px; border: 1px solid #d89b1d; border-radius: 9px; color: #fff; background: #b8790d; font-size: 10px; font-weight: 850; white-space: nowrap; transition: background .2s, transform .2s; }
 .safety-summary__action:hover:not(:disabled) { background: #9c6509; transform: translateY(-1px); }
 .safety-summary__action:disabled { cursor: wait; opacity: .62; }
@@ -211,6 +215,7 @@ a:focus-visible {
 .helper-card--completed { min-height: 210px; display: grid; place-content: center; justify-items: center; gap: 15px; border-color: rgba(126, 211, 174, .35); text-align: center; background: linear-gradient(145deg, #f5fff9, #e6f5ed); }
 .helper-card--completed p { max-width: 330px; margin: 0; color: #214c3e; font-size: 17px; font-weight: 850; line-height: 1.55; word-break: keep-all; text-wrap: balance; }
 .completion-thanks__icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; color: #e98b68; background: #fff; font-size: 16px; font-weight: 900; box-shadow: 0 9px 22px rgba(32, 106, 82, .13); }
+.completion-credit { color: #26765d; font-size: 13px; font-weight: 900; letter-spacing: .02em; }
 .helper-card__topline { gap: 11px; }
 .helper-avatar { flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; color: #19513f; background: #d9f0e5; font-size: 11px; font-weight: 900; }
 .helper-card__topline .eyebrow { margin: 0 0 2px; color: #7d8882; font-size: 9px; font-weight: 850; letter-spacing: .06em; }

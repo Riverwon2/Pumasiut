@@ -11,7 +11,11 @@ import type {
   TaskCandidateQueue,
   TaskConnectionStatus,
 } from './types'
-import { deriveRequesterStage } from './workflow'
+import {
+  applyConfirmedSchedule,
+  deriveRequesterStage,
+  initialTaskConnectionStatus,
+} from './workflow'
 
 const SAMPLE_REQUEST =
   '시각장애인인데 안내견이 아파요. 강아지를 동물병원에 데려다주고, 저의 출근 준비를 도와줄 사람이 필요해요.'
@@ -31,6 +35,11 @@ interface TaskConnection {
   candidateIndex: number
   status: TaskConnectionStatus
   retried: boolean
+}
+
+interface ScheduleDraft {
+  startTime: string
+  endTime: string
 }
 
 type HelperCardStatus = 'pending' | 'accepted' | 'completed'
@@ -142,6 +151,15 @@ function AgentConsole({
 }
 
 function connectionCopy(queue: TaskCandidateQueue, connection: TaskConnection | undefined) {
+  if (connection?.status === 'schedule_required') {
+    return {
+      title: queue.task.targetTime
+        ? `${queue.task.targetTime} 기준 작업 시간을 확인해주세요`
+        : '작업 시간을 확인해주세요',
+      badge: '시간 확인',
+      tone: 'caution',
+    }
+  }
   if (connection?.status === 'confirmation_required') {
     return {
       title: '주의가 필요한 요청입니다',
@@ -205,6 +223,7 @@ function HelperCard({
       >
         <span className="completion-thanks__icon" aria-hidden="true">♥</span>
         <p>따뜻한 세상을 위해 노력해주셔서 감사합니다.</p>
+        <span className="completion-credit">+30 credit</span>
       </article>
     )
   }
@@ -241,7 +260,10 @@ function HelperCard({
 
       <dl className="helper-meta">
         <div><dt>일정</dt><dd>{formatDate(assignment.task.date)}</dd></div>
-        <div><dt>시간</dt><dd>{assignment.task.startTime}–{assignment.task.endTime}</dd></div>
+        <div>
+          <dt>시간</dt>
+          <dd>{assignment.task.startTime ?? '확인 필요'}–{assignment.task.endTime ?? '확인 필요'}</dd>
+        </div>
         <div><dt>도움 경험</dt><dd>{assignment.helper.completedHelpCount}회</dd></div>
       </dl>
 
@@ -281,6 +303,7 @@ export default function App() {
   const [logs, setLogs] = useState<string[]>([])
   const [plan, setPlan] = useState<AssignmentPlan | null>(null)
   const [connections, setConnections] = useState<Record<string, TaskConnection>>({})
+  const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, ScheduleDraft>>({})
   const [stage, setStage] = useState<RequesterDemoStage>('form')
   const [errorMessage, setErrorMessage] = useState('')
   const abortRef = useRef<AbortController | null>(null)
@@ -297,7 +320,7 @@ export default function App() {
   const isSuccessfulMatchingComplete = stage === 'matched' || stage === 'completed'
   const agentCompleted = stage === 'failed' || (
     plan !== null && Object.values(connections).every(({ status }) =>
-      !['waiting', 'confirmation_required', 'searching'].includes(status),
+      !['waiting', 'confirmation_required', 'schedule_required', 'searching'].includes(status),
     )
   )
 
@@ -323,11 +346,11 @@ export default function App() {
     if (!plan) return []
     return plan.candidateQueues.filter((queue) => {
       const status = connections[queue.task.taskId]?.status
-      return status === 'confirmation_required' || status === 'searching'
+      return ['confirmation_required', 'schedule_required', 'searching'].includes(status ?? '')
     })
   }, [connections, plan])
 
-  const isConfirmingMidTask = pendingApprovals.some(
+  const isConfirmingTask = pendingApprovals.some(
     (queue) => connections[queue.task.taskId]?.status === 'searching',
   )
 
@@ -352,7 +375,9 @@ export default function App() {
     const states = candidatePlan.candidateQueues.map(
       (queue) => nextConnections[queue.task.taskId]?.status ?? 'unmatched',
     )
-    if (states.some((state) => state === 'confirmation_required' || state === 'searching')) {
+    if (states.some((state) =>
+      ['confirmation_required', 'schedule_required', 'searching'].includes(state),
+    )) {
       return 'review_required'
     }
     return deriveRequesterStage(states)
@@ -370,15 +395,16 @@ export default function App() {
           queue.task.taskId,
           {
             candidateIndex: 0,
-            status: queue.task.riskLevel === 'mid'
-              ? 'confirmation_required'
-              : queue.candidates.length > 0
-                ? 'waiting'
-                : 'unmatched',
+            status: initialTaskConnectionStatus(queue.task, queue.candidates.length),
             retried: false,
           } satisfies TaskConnection,
         ]),
       )
+      setScheduleDrafts(Object.fromEntries(
+        event.data.candidateQueues
+          .filter((queue) => queue.task.scheduleNeedsConfirmation)
+          .map((queue) => [queue.task.taskId, { startTime: '', endTime: '' }]),
+      ))
       setConnections(initialConnections)
       setStage(stageFromConnections(event.data, initialConnections))
       return
@@ -401,6 +427,7 @@ export default function App() {
     setPlan(null)
     setLogs([])
     setConnections({})
+    setScheduleDrafts({})
 
     try {
       await streamHelpRequest(form, handleEvent, controller.signal)
@@ -465,10 +492,24 @@ export default function App() {
     })
   }
 
-  const handleConfirmMidTask = async (taskId: string) => {
-    if (!plan || isConfirmingMidTask) return
+  const handleConfirmTask = async (taskId: string) => {
+    if (!plan || isConfirmingTask) return
     const queue = plan.candidateQueues.find((item) => item.task.taskId === taskId)
-    if (!queue || queue.task.riskLevel !== 'mid') return
+    if (!queue) return
+    const previousStatus = connections[taskId]?.status
+    if (previousStatus !== 'confirmation_required' && previousStatus !== 'schedule_required') {
+      return
+    }
+
+    let confirmedTask = queue.task
+    if (previousStatus === 'schedule_required') {
+      const draft = scheduleDrafts[taskId]
+      if (!draft?.startTime || !draft.endTime || draft.startTime >= draft.endTime) {
+        setErrorMessage('작업 종료 시간은 시작 시간보다 늦어야 합니다.')
+        return
+      }
+      confirmedTask = applyConfirmedSchedule(queue.task, draft.startTime, draft.endTime)
+    }
 
     setErrorMessage('')
     setConnections((current) => ({
@@ -478,7 +519,11 @@ export default function App() {
         status: 'searching',
       },
     }))
-    appendLog(`${queue.task.title} 작업을 다시 확인하고 도우미 검색을 시작했어요.`)
+    appendLog(
+      previousStatus === 'schedule_required'
+        ? `${queue.task.title} 작업 시간을 확인하고 도우미 검색을 시작했어요.`
+        : `${queue.task.title} 작업을 다시 확인하고 도우미 검색을 시작했어요.`,
+    )
 
     const excludedCandidateIds = plan.candidateQueues.flatMap((item) =>
       item.candidates.map((candidate) => candidate.helper.candidateId),
@@ -487,11 +532,14 @@ export default function App() {
     try {
       const matchedQueue = await matchConfirmedTask(
         form.requesterName,
-        queue.task,
+        confirmedTask,
         excludedCandidateIds,
       )
       const nextPlan = {
         ...plan,
+        tasks: plan.tasks.map((task) =>
+          task.taskId === taskId ? matchedQueue.task : task,
+        ),
         candidateQueues: plan.candidateQueues.map((item) =>
           item.task.taskId === taskId ? matchedQueue : item,
         ),
@@ -517,7 +565,7 @@ export default function App() {
         ...current,
         [taskId]: {
           ...(current[taskId] ?? { candidateIndex: 0, retried: false }),
-          status: 'confirmation_required',
+          status: previousStatus,
         },
       }))
       setErrorMessage((error as Error).message)
@@ -530,6 +578,7 @@ export default function App() {
     setStage('form')
     setPlan(null)
     setConnections({})
+    setScheduleDrafts({})
     setLogs([])
     setErrorMessage('')
   }
@@ -640,8 +689,8 @@ export default function App() {
                       ? '이웃 찾기를 중단했어요. 오른쪽의 119 전화 연결을 이용해주세요.'
                       : stage === 'safety_excluded'
                         ? '위험하거나 생활·정서지원으로 보기 어려운 내용은 도우미에게 전달하지 않아요.'
-                        : stage === 'review_required'
-                          ? '주의가 필요한 작업은 사용자가 확인하기 전까지 도우미를 찾지 않아요.'
+                      : stage === 'review_required'
+                          ? '안전 또는 작업 시간 확인이 끝나기 전까지 도우미를 찾지 않아요.'
                           : stage === 'partially_completed'
                             ? '완료된 작업과 연결 결과를 아래에서 확인할 수 있어요.'
                             : stage === 'partially_matched'
@@ -673,7 +722,7 @@ export default function App() {
                     </h2>
                     <p>
                       {stage === 'emergency' || stage === 'safety_excluded' || stage === 'review_required'
-                        ? '안전 확인을 통과한 작업만 분해하며, 주의 작업은 재확인 후 후보를 최대 2명까지 찾아요.'
+                        ? '안전 확인을 통과하고 시간이 확정된 작업만 후보를 최대 2명까지 찾아요.'
                         : '같은 시각에 겹친 일은 여러 이웃에게 나눠 요청하며, 작업마다 후보를 최대 2명까지 확인해요.'}
                     </p>
                   </>
@@ -694,23 +743,70 @@ export default function App() {
                       </p>
                     )}
                     {!plan.safety.emergencyBlocked && pendingApprovals.map((queue) => {
-                      const searching = connections[queue.task.taskId]?.status === 'searching'
+                      const taskId = queue.task.taskId
+                      const status = connections[taskId]?.status
+                      const searching = status === 'searching'
+                      const needsSchedule = Boolean(queue.task.scheduleNeedsConfirmation)
+                      const draft = scheduleDrafts[taskId] ?? { startTime: '', endTime: '' }
+                      const scheduleReady = Boolean(
+                        draft.startTime && draft.endTime && draft.startTime < draft.endTime,
+                      )
                       return (
                         <div
                           className="safety-summary__item safety-summary__item--caution"
-                          key={`approval-${queue.task.taskId}`}
+                          key={`approval-${taskId}`}
                         >
                           <div className="safety-summary__content">
-                            <strong>사용자 확인 필요 · {queue.task.title}</strong>
-                            <span>주의가 필요한 요청입니다. 확인 전까지 도우미를 검색하지 않아요.</span>
+                            <strong>
+                              {needsSchedule ? '작업 시간 확인 필요' : '사용자 확인 필요'}
+                              {' · '}{queue.task.title}
+                            </strong>
+                            <span>
+                              {needsSchedule
+                                ? `${queue.task.timeSourceText ?? queue.task.targetTime ?? '자연어 시각'}을 보존했어요. 시작과 종료 시각을 확인해주세요.`
+                                : '주의가 필요한 요청입니다. 확인 전까지 도우미를 검색하지 않아요.'}
+                            </span>
+                            {needsSchedule && (
+                              <div className="schedule-confirmation-fields">
+                                <label>
+                                  <span>시작</span>
+                                  <input
+                                    type="time"
+                                    value={draft.startTime}
+                                    disabled={searching}
+                                    onChange={(event) => setScheduleDrafts((current) => ({
+                                      ...current,
+                                      [taskId]: { ...draft, startTime: event.target.value },
+                                    }))}
+                                  />
+                                </label>
+                                <span aria-hidden="true">→</span>
+                                <label>
+                                  <span>종료</span>
+                                  <input
+                                    type="time"
+                                    value={draft.endTime}
+                                    disabled={searching}
+                                    onChange={(event) => setScheduleDrafts((current) => ({
+                                      ...current,
+                                      [taskId]: { ...draft, endTime: event.target.value },
+                                    }))}
+                                  />
+                                </label>
+                              </div>
+                            )}
                           </div>
                           <button
                             type="button"
                             className="safety-summary__action"
-                            disabled={isConfirmingMidTask}
-                            onClick={() => handleConfirmMidTask(queue.task.taskId)}
+                            disabled={isConfirmingTask || (needsSchedule && !scheduleReady)}
+                            onClick={() => handleConfirmTask(taskId)}
                           >
-                            {searching ? '도우미 찾는 중…' : '그래도 도움 요청'}
+                            {searching
+                              ? '도우미 찾는 중…'
+                              : needsSchedule
+                                ? '이 시간으로 도움 요청'
+                                : '그래도 도움 요청'}
                           </button>
                         </div>
                       )

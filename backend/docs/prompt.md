@@ -14,7 +14,11 @@ the requester explicitly confirms them. Context-free convenience and entertainme
 excluded, while disability, aging, health, caregiving, and social-isolation contexts may produce
 valid daily-living or emotional-support tasks.
 
-The selected date and time fields are authoritative. Natural-language scheduling details may add
-context but never override those fields. Helper eligibility and ranking are computed in Python,
-using recurring availability, distance ascending, and completed-help count descending. Raw model
+The selected UI date is authoritative. Task-specific times in approved natural-language findings
+take precedence over the UI time window; the UI start and end times are only a fallback for tasks
+without an explicit time. Appointment or deadline times are preserved as point constraints and no
+start or duration is invented. Tasks with incomplete ranges pause before matching until the
+requester confirms both start and end. A deterministic coverage check retries planning if an
+explicit approved time was omitted. Helper eligibility and ranking are computed in Python using
+recurring availability, distance ascending, and completed-help count descending. Raw model
 reasoning is never exposed to the requester-facing interface.

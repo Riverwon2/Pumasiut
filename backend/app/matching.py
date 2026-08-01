@@ -24,6 +24,8 @@ def load_candidates(path: Path) -> list[HelperCandidate]:
 
 
 def is_available(candidate: HelperCandidate, task: PlannedTask) -> bool:
+    if task.start_time is None or task.end_time is None or task.schedule_needs_confirmation:
+        return False
     return any(
         availability.start_time <= task.start_time and task.end_time <= availability.end_time
         for availability in candidate.availability_time_ranges
@@ -107,7 +109,9 @@ def build_assignment_plan(
 ) -> AssignmentPlan:
     tasks = task_plan.tasks[:3]
     searchable_ids = search_task_ids or {
-        task.task_id for task in tasks if task.risk_level == "low"
+        task.task_id
+        for task in tasks
+        if task.risk_level == "low" and not task.schedule_needs_confirmation
     }
     searchable_tasks = [task for task in tasks if task.task_id in searchable_ids]
     first_round = choose_helpers(searchable_tasks, candidates)
@@ -176,7 +180,7 @@ def build_assignment_plan(
     )
 
 
-def build_confirmed_mid_queue(
+def build_confirmed_task_queue(
     requester_name: str,
     task: PlannedTask,
     candidates: Sequence[HelperCandidate],

@@ -18,7 +18,7 @@ def test_end_time_must_be_later_than_start_time() -> None:
         )
 
 
-def test_planner_input_marks_ui_schedule_as_authoritative() -> None:
+def test_planner_input_uses_ui_time_as_fallback_and_preserves_explicit_times() -> None:
     request = HelpRequest(
         requester_name="김하늘",
         request_text="내일 10시에 출근 준비를 도와주세요.",
@@ -31,16 +31,17 @@ def test_planner_input_marks_ui_schedule_as_authoritative() -> None:
         (
             SafetyFinding(
                 finding_id="finding-1",
-                source_text="출근 준비를 도와주세요.",
+                source_text="10시까지 출근 준비를 도와주세요.",
                 classification="low",
                 category="daily_living",
                 reason="일상 생활지원 요청이에요.",
             ),
         ),
     )
-    assert "자연어보다 우선하는 확정값" in planner_input
+    assert "UI 시간은 자연어 시각이 없는 작업에만 사용하는 기본값" in planner_input
     assert '"date": "2026-08-05"' in planner_input
-    assert '"startTime": "08:00"' in planner_input
+    assert '"explicitTimes": ["10:00"]' in planner_input
+    assert '"uiDefaultTime": {"startTime": "08:00", "endTime": "09:00"}' in planner_input
 
 
 def test_coordinator_uses_a_blocking_input_guardrail() -> None:
