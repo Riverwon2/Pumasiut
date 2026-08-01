@@ -592,7 +592,7 @@ export default function App() {
               <div className="brand-care-face">
                 <CareFace stage={stage} />
               </div>
-              <span className="brand-name">품앗이웃</span>
+              <span className="brand-name">품앗이웃 - 요청자 화면</span>
             </a>
             <span className="demo-badge"><i aria-hidden="true" /> LIVE DEMO</span>
           </header>
@@ -600,7 +600,6 @@ export default function App() {
           {stage === 'form' ? (
             <>
               <div className="intro" id="top">
-                <p className="section-kicker">요청자 화면</p>
                 <h1 id="requester-heading">어떤 도움이<br />필요하신가요?</h1>
                 <p>필요한 일을 편하게 말씀해주세요. 에이전트가 일을 나누고 가까운 도우미를 찾아드려요.</p>
               </div>
