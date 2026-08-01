@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { deriveRequesterStage } from './workflow'
 
 describe('deriveRequesterStage', () => {
+  it('pauses matching while a safety confirmation is required', () => {
+    expect(deriveRequesterStage(['confirmation_required'])).toBe('review_required')
+    expect(deriveRequesterStage(['searching', 'accepted'])).toBe('review_required')
+  })
+
   it('keeps an accepted request distinct from a completed request', () => {
     expect(deriveRequesterStage(['accepted'])).toBe('matched')
     expect(deriveRequesterStage(['completed'])).toBe('completed')

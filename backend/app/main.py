@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from app.agents_workflow import prepare_raw_api_stream_log, run_workflow
-from app.models import HealthResponse, HelpRequest
+from app.matching import build_confirmed_mid_queue, load_candidates
+from app.models import ConfirmMidMatchRequest, HealthResponse, HelpRequest, TaskCandidateQueue
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -96,6 +97,17 @@ async def stream_request(request: HelpRequest) -> StreamingResponse:
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@app.post("/api/tasks/confirm-match", response_model=TaskCandidateQueue)
+async def confirm_mid_task(request: ConfirmMidMatchRequest) -> TaskCandidateQueue:
+    candidates = load_candidates(CANDIDATES_PATH)
+    return build_confirmed_mid_queue(
+        requester_name=request.requester_name,
+        task=request.task,
+        candidates=candidates,
+        excluded_candidate_ids=set(request.excluded_candidate_ids),
     )
 
 

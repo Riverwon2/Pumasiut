@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 TimeText = Annotated[str, StringConstraints(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")]
+SafetyClassification = Literal["low", "mid", "high", "emergency", "not_actionable"]
+TaskRiskLevel = Literal["low", "mid"]
 
 
 def to_camel(value: str) -> str:
@@ -35,13 +37,36 @@ class HelpRequest(ApiModel):
         return self
 
 
+class SafetyFinding(ApiModel):
+    finding_id: str = Field(min_length=1, max_length=40)
+    source_text: str = Field(min_length=1, max_length=400)
+    classification: SafetyClassification
+    category: str = Field(min_length=1, max_length=60)
+    reason: str = Field(min_length=1, max_length=240)
+
+
+class SafetyAssessment(ApiModel):
+    summary: str = Field(min_length=1, max_length=240)
+    findings: list[SafetyFinding] = Field(min_length=1, max_length=8)
+
+
+class SafetySummary(ApiModel):
+    highest_classification: SafetyClassification = "low"
+    emergency_blocked: bool = False
+    high_discarded_count: int = Field(default=0, ge=0)
+    not_actionable_count: int = Field(default=0, ge=0)
+    mid_confirmation_count: int = Field(default=0, ge=0)
+
+
 class PlannedTask(ApiModel):
     task_id: str = Field(min_length=1, max_length=40)
+    safety_finding_id: str = Field(min_length=1, max_length=40)
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=300)
     date: date
     start_time: TimeText
     end_time: TimeText
+    risk_level: TaskRiskLevel
 
 
 class TaskPlan(ApiModel):
@@ -99,6 +124,19 @@ class AssignmentPlan(ApiModel):
     assignments: list[Assignment] = Field(max_length=3)
     candidate_queues: list[TaskCandidateQueue] = Field(max_length=3)
     unassigned_task_ids: list[str]
+    safety: SafetySummary = Field(default_factory=SafetySummary)
+
+
+class ConfirmMidMatchRequest(ApiModel):
+    requester_name: str = Field(min_length=1, max_length=40)
+    task: PlannedTask
+    excluded_candidate_ids: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_mid_task(self) -> ConfirmMidMatchRequest:
+        if self.task.risk_level != "mid":
+            raise ValueError("주의 요청으로 분류된 작업만 다시 확인할 수 있습니다.")
+        return self
 
 
 class CoordinatorResult(ApiModel):

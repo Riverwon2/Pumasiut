@@ -1,6 +1,11 @@
 from datetime import date
 
-from app.matching import build_assignment_plan, choose_helpers, is_available
+from app.matching import (
+    build_assignment_plan,
+    build_confirmed_mid_queue,
+    choose_helpers,
+    is_available,
+)
 from app.models import (
     AvailabilityRange,
     HelperCandidate,
@@ -12,11 +17,13 @@ from app.models import (
 def task(task_id: str = "task-1", start: str = "08:00", end: str = "09:00") -> PlannedTask:
     return PlannedTask(
         task_id=task_id,
+        safety_finding_id=f"finding-{task_id}",
         title=f"작업 {task_id}",
         description="도움이 필요한 작업",
         date=date(2026, 8, 3),
         start_time=start,
         end_time=end,
+        risk_level="low",
     )
 
 
@@ -98,3 +105,25 @@ def test_each_task_reserves_at_most_two_distinct_candidates() -> None:
     ]
     assert all(len(queue.candidates) <= 2 for queue in plan.candidate_queues)
     assert len(option_ids) == len(set(option_ids)) == 4
+
+
+def test_mid_task_is_not_searched_before_confirmation() -> None:
+    mid_task = task().model_copy(update={"risk_level": "mid"})
+    plan = build_assignment_plan(
+        "김하늘",
+        TaskPlan(request_summary="요약", tasks=[mid_task]),
+        [candidate("a", 100, 10)],
+    )
+    assert plan.candidate_queues[0].candidates == []
+    assert plan.unassigned_task_ids == []
+
+
+def test_confirmed_mid_task_searches_two_new_candidates() -> None:
+    mid_task = task().model_copy(update={"risk_level": "mid"})
+    queue = build_confirmed_mid_queue(
+        "김하늘",
+        mid_task,
+        [candidate("used", 50, 30), candidate("a", 100, 10), candidate("b", 200, 20)],
+        {"used"},
+    )
+    assert [option.helper.candidate_id for option in queue.candidates] == ["a", "b"]

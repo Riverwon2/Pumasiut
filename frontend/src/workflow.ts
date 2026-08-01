@@ -3,6 +3,9 @@ import type { RequesterDemoStage, TaskConnectionStatus } from './types'
 export function deriveRequesterStage(
   states: readonly TaskConnectionStatus[],
 ): RequesterDemoStage {
+  if (states.some((state) => state === 'confirmation_required' || state === 'searching')) {
+    return 'review_required'
+  }
   if (states.some((state) => state === 'waiting')) return 'matching'
 
   const accepted = states.filter((state) => state === 'accepted').length
