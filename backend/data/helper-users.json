@@ -1,0 +1,128 @@
+{
+  "candidates": [
+    {
+      "candidateId": "demo-helper-001",
+      "displayName": "가상 도우미 민지",
+      "availabilityTimeRanges": [
+        { "startTime": "00:00", "endTime": "13:00" },
+        { "startTime": "15:00", "endTime": "20:00" }
+      ],
+      "distanceMeters": 300,
+      "experienceTags": ["delivery", "grocery_carrying", "dog_walking"],
+      "completedHelpCount": 12,
+      "trustScore": 18
+    },
+    {
+      "candidateId": "demo-helper-002",
+      "displayName": "가상 도우미 준호",
+      "availabilityTimeRanges": [{ "startTime": "14:00", "endTime": "18:00" }],
+      "distanceMeters": 700,
+      "experienceTags": ["library_return", "delivery", "grocery_carrying"],
+      "completedHelpCount": 5,
+      "trustScore": 15
+    },
+    {
+      "candidateId": "demo-helper-003",
+      "displayName": "가상 도우미 서연",
+      "availabilityTimeRanges": [{ "startTime": "15:00", "endTime": "21:00" }],
+      "distanceMeters": 1200,
+      "experienceTags": ["delivery", "dog_walking"],
+      "completedHelpCount": 2,
+      "trustScore": 12
+    },
+    {
+      "candidateId": "demo-helper-004",
+      "displayName": "가상 도우미 현우",
+      "availabilityTimeRanges": [
+        { "startTime": "08:00", "endTime": "12:00" },
+        { "startTime": "18:00", "endTime": "22:00" }
+      ],
+      "distanceMeters": 450,
+      "experienceTags": ["recycling", "grocery_carrying", "document_delivery"],
+      "completedHelpCount": 28,
+      "trustScore": 19
+    },
+    {
+      "candidateId": "demo-helper-005",
+      "displayName": "가상 도우미 지원",
+      "availabilityTimeRanges": [{ "startTime": "10:00", "endTime": "16:00" }],
+      "distanceMeters": 1600,
+      "experienceTags": ["meal_delivery", "library_return", "delivery"],
+      "completedHelpCount": 9,
+      "trustScore": 16
+    },
+    {
+      "candidateId": "demo-helper-006",
+      "displayName": "가상 도우미 태호",
+      "availabilityTimeRanges": [
+        { "startTime": "06:00", "endTime": "09:00" },
+        { "startTime": "17:00", "endTime": "21:00" }
+      ],
+      "distanceMeters": 2400,
+      "experienceTags": ["dog_walking", "recycling"],
+      "completedHelpCount": 4,
+      "trustScore": 13
+    },
+    {
+      "candidateId": "demo-helper-007",
+      "displayName": "가상 도우미 유나",
+      "availabilityTimeRanges": [{ "startTime": "09:00", "endTime": "19:00" }],
+      "distanceMeters": 180,
+      "experienceTags": ["document_delivery", "grocery_carrying", "library_return"],
+      "completedHelpCount": 47,
+      "trustScore": 20
+    },
+    {
+      "candidateId": "demo-helper-008",
+      "displayName": "가상 도우미 도윤",
+      "availabilityTimeRanges": [{ "startTime": "11:00", "endTime": "17:00" }],
+      "distanceMeters": 950,
+      "experienceTags": ["grocery_carrying", "meal_delivery", "delivery"],
+      "completedHelpCount": 0,
+      "trustScore": 10
+    },
+    {
+      "candidateId": "demo-helper-009",
+      "displayName": "가상 도우미 하린",
+      "availabilityTimeRanges": [
+        { "startTime": "07:00", "endTime": "11:00" },
+        { "startTime": "16:00", "endTime": "20:00" }
+      ],
+      "distanceMeters": 3200,
+      "experienceTags": ["dog_walking", "grocery_carrying"],
+      "completedHelpCount": 8,
+      "trustScore": 14
+    },
+    {
+      "candidateId": "demo-helper-010",
+      "displayName": "가상 도우미 지호",
+      "availabilityTimeRanges": [{ "startTime": "13:00", "endTime": "22:00" }],
+      "distanceMeters": 600,
+      "experienceTags": ["recycling", "document_delivery", "delivery"],
+      "completedHelpCount": 21,
+      "trustScore": 17
+    },
+    {
+      "candidateId": "demo-helper-011",
+      "displayName": "가상 도우미 수아",
+      "availabilityTimeRanges": [
+        { "startTime": "08:00", "endTime": "14:00" },
+        { "startTime": "18:00", "endTime": "21:00" }
+      ],
+      "distanceMeters": 1400,
+      "experienceTags": ["meal_delivery", "grocery_carrying", "library_return"],
+      "completedHelpCount": 14,
+      "trustScore": 18
+    },
+    {
+      "candidateId": "demo-helper-012",
+      "displayName": "가상 도우미 건우",
+      "availabilityTimeRanges": [{ "startTime": "12:00", "endTime": "20:00" }],
+      "distanceMeters": 4800,
+      "experienceTags": ["delivery", "recycling"],
+      "completedHelpCount": 3,
+      "trustScore": 11
+    }
+  ]
+}
+
