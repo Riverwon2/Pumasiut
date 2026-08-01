@@ -53,10 +53,14 @@ export type StreamEvent =
 
 export type ResponseStatus = 'pending' | 'accepted' | 'declined'
 
+export type TaskConnectionStatus = 'waiting' | 'accepted' | 'completed' | 'unmatched'
+
 export type RequesterDemoStage =
   | 'form'
   | 'matching'
   | 'matched'
   | 'partially_matched'
+  | 'completed'
+  | 'partially_completed'
   | 'unmatched'
   | 'failed'

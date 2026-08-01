@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.agents_workflow import run_workflow
+from app.agents_workflow import prepare_raw_api_stream_log, run_workflow
 from app.models import HealthResponse, HelpRequest
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -100,5 +100,6 @@ async def stream_request(request: HelpRequest) -> StreamingResponse:
 
 
 def run() -> None:
+    prepare_raw_api_stream_log()
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=False)

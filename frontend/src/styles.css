@@ -109,9 +109,9 @@ a:focus-visible {
 
 .request-status-view { padding-bottom: 12px; }
 .care-hero { display: flex; flex-direction: column; align-items: center; text-align: center; }
-.care-hero .section-kicker { margin-top: 9px; }
-.care-hero h1 { max-width: 620px; margin: 0; color: #1c3029; font-size: clamp(35px, 3.5vw, 52px); line-height: 1.12; letter-spacing: -.055em; }
-.care-hero > p:last-child { max-width: 550px; margin: 17px 0 0; color: #68736d; font-size: 14px; line-height: 1.7; }
+.care-hero .section-kicker { margin-top: 14px; margin-bottom: 14px; font-size: 13px; }
+.care-hero h1 { max-width: 640px; margin: 0; color: #1c3029; font-size: clamp(34px, 3.35vw, 49px); line-height: 1.12; letter-spacing: -.055em; overflow-wrap: normal; word-break: keep-all; text-wrap: balance; }
+.care-hero > p:last-child { max-width: 570px; margin: 18px 0 0; color: #68736d; font-size: 15px; line-height: 1.7; word-break: keep-all; text-wrap: balance; }
 
 .care-face-wrap {
   position: relative;
@@ -150,6 +150,7 @@ a:focus-visible {
 .orbit-heart--top-left { top: 38px; left: 19px; animation-delay: -.5s; }
 
 .connection-section { margin-top: 40px; text-align: center; }
+.connection-section--compact { margin-top: 28px; }
 .connection-section > h2 { margin: 0; color: #1f332c; font-size: 25px; letter-spacing: -.04em; }
 .connection-section > p { max-width: 580px; margin: 10px auto 21px; color: #717b76; font-size: 12px; line-height: 1.65; }
 .connection-list { display: grid; gap: 12px; text-align: left; }
@@ -161,6 +162,9 @@ a:focus-visible {
 .connection-row--accepted { border-color: #b7dcca; background: #f6fffa; }
 .connection-row--accepted .connection-label,
 .connection-row--accepted .connection-badge { color: #fff; background: var(--green); }
+.connection-row--completed { border-color: #9ecfb8; background: #effbf5; }
+.connection-row--completed .connection-label,
+.connection-row--completed .connection-badge { color: #fff; background: #174f3f; }
 .connection-row--unmatched { opacity: .72; }
 .connection-row--unmatched .connection-label { color: #6a625e; background: #e8e2dc; }
 .connection-row--unmatched .connection-badge { color: #8f4b3f; background: #f5dfda; }
@@ -169,11 +173,8 @@ a:focus-visible {
 .reset-button { width: 100%; min-height: 47px; margin-top: 14px; border: 1px solid #bfc8c3; border-radius: 13px; color: #315044; background: transparent; font-weight: 850; }
 .reset-button:hover { background: rgba(32,106,82,.06); }
 
-.helpers-header { justify-content: space-between; margin: 60px 0 32px; }
+.helpers-header { margin: 60px 0 32px; }
 .helpers-header h2 { color: #fff; font-size: clamp(31px, 3.2vw, 48px); }
-.match-count { flex: 0 0 auto; display: grid; place-items: center; width: 76px; height: 76px; border: 1px solid rgba(188,231,212,.23); border-radius: 50%; background: rgba(255,255,255,.05); }
-.match-count strong { font-size: 24px; line-height: 1; }
-.match-count span { color: #9fb6ac; font-size: 9px; }
 .helper-empty { min-height: 520px; display: grid; place-content: center; justify-items: center; text-align: center; }
 .helper-empty h3 { margin: 25px 0 8px; font-size: 18px; }
 .helper-empty p { max-width: 330px; margin: 0; color: #9aada5; font-size: 13px; line-height: 1.7; }
@@ -190,6 +191,9 @@ a:focus-visible {
 .helper-card { padding: 20px; border: 1px solid rgba(198,224,213,.12); border-radius: 20px; color: var(--ink); background: #fffdf8; box-shadow: 0 18px 45px rgba(3,17,27,.22); transition: transform .2s, opacity .2s; }
 .helper-card:hover { transform: translateY(-2px); }
 .helper-card--declined { opacity: .7; }
+.helper-card--completed { min-height: 210px; display: grid; place-content: center; justify-items: center; gap: 15px; border-color: rgba(126, 211, 174, .35); text-align: center; background: linear-gradient(145deg, #f5fff9, #e6f5ed); }
+.helper-card--completed p { max-width: 330px; margin: 0; color: #214c3e; font-size: 17px; font-weight: 850; line-height: 1.55; word-break: keep-all; text-wrap: balance; }
+.completion-thanks__icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; color: #e98b68; background: #fff; font-size: 16px; font-weight: 900; box-shadow: 0 9px 22px rgba(32, 106, 82, .13); }
 .helper-card__topline { gap: 11px; }
 .helper-avatar { flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 13px; color: #19513f; background: #d9f0e5; font-size: 11px; font-weight: 900; }
 .helper-card__topline .eyebrow { margin: 0 0 2px; color: #7d8882; font-size: 9px; font-weight: 850; letter-spacing: .06em; }
@@ -217,6 +221,9 @@ a:focus-visible {
 .helper-card--declined .response-result { color: #6c7470; background: #ecebe7; }
 .response-result span { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; color: #fff; background: var(--green); }
 .helper-card--declined .response-result span { background: #818985; }
+.request-complete-action { display: grid; }
+.request-complete-button { min-height: 42px; border: 1px solid var(--green); border-radius: 11px; color: #fff; background: var(--green); font-size: 11px; font-weight: 850; transition: background .2s, transform .2s; }
+.request-complete-button:hover { background: #185943; transform: translateY(-1px); }
 .unassigned-note,
 .response-progress { margin: 14px 0 0; text-align: center; color: #afc0b9; font-size: 11px; }
 .all-responses-finished { min-height: 360px; display: grid; place-content: center; justify-items: center; text-align: center; }
@@ -236,7 +243,7 @@ a:focus-visible {
   .brand-row { margin-bottom: 46px; }
   .helpers-header { margin-top: 20px; }
   .helper-empty { min-height: 360px; }
-  .care-hero h1 { font-size: 41px; }
+  .care-hero h1 { font-size: 39px; }
 }
 
 @media (max-width: 560px) {
@@ -248,7 +255,6 @@ a:focus-visible {
   .field--date { grid-column: 1 / -1; }
   .schedule-separator { display: none; }
   .helpers-header h2 { font-size: 32px; }
-  .match-count { width: 64px; height: 64px; }
   .care-face-wrap { width: 215px; height: 215px; transform: scale(.88); margin: -15px 0; }
   .connection-row { grid-template-columns: auto 1fr; gap: 12px; }
   .connection-badge { grid-column: 2; justify-self: start; }

@@ -10,7 +10,8 @@
 - Eligible helpers are ranked by distance ascending, then completed-help count descending.
 - The right side shows no more than three helper response cards.
 - Each task has a queue of at most two distinct helper candidates.
-- Accept completes that task. Decline advances to the next candidate; exhausting the queue completes it as unmatched.
+- Accept moves that task into an accepted mission state. The helper explicitly completes the mission after doing the work.
+- Decline advances to the next candidate; exhausting the queue completes it as unmatched.
 
 ## Runtime flow
 
@@ -24,7 +25,9 @@ React form
           -> deterministic Python assignment
   -> public phase SSE events
   -> typed AssignmentPlan SSE result
-  -> helper cards with local accept/decline state
+  -> helper cards with local accept/decline/mission-complete state
+  -> accept keeps the helper card open with a mission-complete action
+  -> mission complete changes requester and helper views from accepted to completed
   -> decline advances the task's candidate queue (max 2)
   -> exhausted queue is shown as unmatched
 ```

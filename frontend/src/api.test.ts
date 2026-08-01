@@ -19,4 +19,5 @@ describe('parseSseChunk', () => {
     )
     expect(result.events[0]?.type).toBe('result')
   })
+
 })

@@ -82,4 +82,3 @@ export async function streamHelpRequest(
     if (trailing) onEvent(trailing)
   }
 }
-

@@ -9,7 +9,9 @@ import type {
   ResponseStatus,
   StreamEvent,
   TaskCandidateQueue,
+  TaskConnectionStatus,
 } from './types'
+import { deriveRequesterStage } from './workflow'
 
 const SAMPLE_REQUEST =
   '시각장애인인데 안내견이 아파요. 강아지를 동물병원에 데려다주고, 저의 출근 준비를 도와줄 사람이 필요해요.'
@@ -27,9 +29,12 @@ const orbitHeartPositions = [
 
 interface TaskConnection {
   candidateIndex: number
-  status: 'waiting' | 'accepted' | 'unmatched'
+  status: TaskConnectionStatus
   retried: boolean
 }
+
+type HelperCardStatus = 'pending' | 'accepted' | 'completed'
+type HelperDecision = Exclude<ResponseStatus, 'pending'>
 
 interface FormErrors {
   requesterName?: string
@@ -71,7 +76,7 @@ function validate(input: HelpRequestInput): FormErrors {
 }
 
 function CareFace({ stage }: { readonly stage: RequesterDemoStage }) {
-  const settled = ['matched', 'partially_matched'].includes(stage)
+  const settled = ['matched', 'partially_matched', 'completed', 'partially_completed'].includes(stage)
   const stopped = ['unmatched', 'failed'].includes(stage)
 
   return (
@@ -142,7 +147,20 @@ function connectionCopy(queue: TaskCandidateQueue, connection: TaskConnection | 
     }
   }
   if (connection.status === 'accepted') {
-    return { title: '도움 수락 완료', badge: '수락 완료', tone: 'accepted' }
+    const candidate = queue.candidates[connection.candidateIndex]
+    return {
+      title: candidate ? `${candidate.helper.displayName}님이 요청을 수락했어요` : '요청을 수락했어요',
+      badge: '수락 완료',
+      tone: 'accepted',
+    }
+  }
+  if (connection.status === 'completed') {
+    const candidate = queue.candidates[connection.candidateIndex]
+    return {
+      title: candidate ? `${candidate.helper.displayName}님이 요청을 완료했어요` : '요청이 완료되었어요',
+      badge: '요청 완료',
+      tone: 'completed',
+    }
   }
   return { title: '연결 가능한 지원자 없음', badge: '지원자 없음', tone: 'unmatched' }
 }
@@ -152,13 +170,26 @@ function HelperCard({
   status,
   attempt,
   onRespond,
+  onRequestComplete,
 }: {
   assignment: Assignment
-  status: ResponseStatus
+  status: HelperCardStatus
   attempt: number
-  onRespond: (status: Exclude<ResponseStatus, 'pending'>) => void
+  onRespond: (status: HelperDecision) => void
+  onRequestComplete: () => void
 }) {
-  const responded = status !== 'pending'
+  if (status === 'completed') {
+    return (
+      <article
+        className="helper-card helper-card--completed"
+        role="status"
+        aria-label={`${assignment.task.title} 요청 완료`}
+      >
+        <span className="completion-thanks__icon" aria-hidden="true">♥</span>
+        <p>따뜻한 세상을 위해 노력해주셔서 감사합니다.</p>
+      </article>
+    )
+  }
 
   return (
     <article className={`helper-card helper-card--${status}`}>
@@ -175,7 +206,11 @@ function HelperCard({
 
       <div className="request-bubble">
         <span className="bubble-mark" aria-hidden="true">“</span>
-        <p>{assignment.invitationMessage}</p>
+        <p>
+          {status === 'accepted'
+            ? '요청 수행 후 아래의 요청 완료 버튼을 눌러주세요!'
+            : assignment.invitationMessage}
+        </p>
       </div>
 
       <div className="task-detail">
@@ -192,10 +227,15 @@ function HelperCard({
         <div><dt>도움 경험</dt><dd>{assignment.helper.completedHelpCount}회</dd></div>
       </dl>
 
-      {responded ? (
-        <div className="response-result" role="status">
-          <span aria-hidden="true">✓</span>
-          요청을 수락했어요
+      {status === 'accepted' ? (
+        <div className="request-complete-action">
+          <button
+            type="button"
+            className="request-complete-button"
+            onClick={onRequestComplete}
+          >
+            요청 완료
+          </button>
         </div>
       ) : (
         <div className="response-actions">
@@ -228,7 +268,11 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null)
 
   const isLoading = stage === 'matching' && !plan
-  const isTerminal = ['matched', 'partially_matched', 'unmatched', 'failed'].includes(stage)
+  const isTerminal = ['completed', 'partially_completed', 'unmatched', 'failed'].includes(stage)
+  const isSuccessfulMatchingComplete = stage === 'matched' || stage === 'completed'
+  const agentCompleted = stage === 'failed' || (
+    plan !== null && Object.values(connections).every(({ status }) => status !== 'waiting')
+  )
 
   const activeAssignments = useMemo(() => {
     if (!plan) return []
@@ -248,6 +292,9 @@ export default function App() {
     })
   }, [connections, plan])
 
+  const allRequestsCompleted = activeAssignments.length > 0
+    && activeAssignments.every(({ connection }) => connection.status === 'completed')
+
   const updateForm = (field: keyof HelpRequestInput, value: string) => {
     setForm((current) => ({ ...current, [field]: value }))
     setErrors((current) => ({ ...current, [field]: undefined, time: undefined }))
@@ -264,11 +311,7 @@ export default function App() {
     const states = candidatePlan.candidateQueues.map(
       (queue) => nextConnections[queue.task.taskId]?.status ?? 'unmatched',
     )
-    if (states.some((state) => state === 'waiting')) return 'matching'
-    const accepted = states.filter((state) => state === 'accepted').length
-    if (accepted === states.length && accepted > 0) return 'matched'
-    if (accepted > 0) return 'partially_matched'
-    return 'unmatched'
+    return deriveRequesterStage(states)
   }
 
   const handleEvent = (event: StreamEvent) => {
@@ -323,7 +366,7 @@ export default function App() {
 
   const handleHelperResponse = (
     taskId: string,
-    response: Exclude<ResponseStatus, 'pending'>,
+    response: HelperDecision,
   ) => {
     if (!plan) return
     const queue = plan.candidateQueues.find((item) => item.task.taskId === taskId)
@@ -350,6 +393,25 @@ export default function App() {
       }
 
       const next = { ...current, [taskId]: nextConnection }
+      setStage(stageFromConnections(plan, next))
+      return next
+    })
+  }
+
+  const handleRequestComplete = (taskId: string) => {
+    if (!plan) return
+    const queue = plan.candidateQueues.find((item) => item.task.taskId === taskId)
+    if (!queue) return
+
+    setConnections((current) => {
+      const existing = current[taskId]
+      if (!existing || existing.status !== 'accepted') return current
+
+      const next = {
+        ...current,
+        [taskId]: { ...existing, status: 'completed' as const },
+      }
+      appendLog(`${queue.task.title} 작업의 요청이 완료되었어요.`)
       setStage(stageFromConnections(plan, next))
       return next
     })
@@ -445,24 +507,44 @@ export default function App() {
                 <CareFace stage={stage} />
                 <p className="section-kicker">도움 신청 현황</p>
                 <h1 id="requester-heading">
-                  {stage === 'unmatched' || stage === 'failed'
-                    ? '연결 결과를 확인해주세요'
+                  {stage === 'completed'
+                    ? '요청한 도움이 완료되었어요'
                     : stage === 'matched'
-                      ? '도움을 줄 이웃을 찾았어요'
-                      : '도움을 요청할 이웃을 찾고 있어요'}
+                      ? '매칭이 완료되었어요'
+                      : stage === 'unmatched' || stage === 'failed'
+                        ? '연결 결과를 확인해주세요'
+                        : stage === 'partially_completed'
+                          ? '완료된 도움을 확인해주세요'
+                          : stage === 'partially_matched'
+                            ? '연결 결과를 확인해주세요'
+                            : '도움을 요청할 이웃을 찾고 있어요'}
                 </h1>
-                <p>
-                  {isTerminal
-                    ? '각 작업의 최종 연결 상태를 아래에서 확인할 수 있어요.'
-                    : '가까이 있고 시간이 맞는 이웃에게 차례대로 요청하고 있어요.'}
-                </p>
+                {!isSuccessfulMatchingComplete && (
+                  <p>
+                    {stage === 'partially_completed'
+                      ? '완료된 작업과 연결 결과를 아래에서 확인할 수 있어요.'
+                      : stage === 'partially_matched'
+                        ? '연결된 작업과 지원자가 없는 작업을 아래에서 확인할 수 있어요.'
+                        : isTerminal
+                          ? '각 작업의 최종 연결 상태를 아래에서 확인할 수 있어요.'
+                          : '가까이 있고 시간이 맞는 이웃에게 차례대로 요청하고 있어요.'}
+                  </p>
+                )}
               </div>
 
-              <section className="connection-section" aria-labelledby="connection-heading">
-                <h2 id="connection-heading">
-                  {plan ? `도우미 ${plan.tasks.length}명에게 나눠 요청해요` : '요청을 안전하게 나누고 있어요'}
-                </h2>
-                <p>같은 시각에 겹친 일은 여러 이웃에게 나눠 요청하며, 작업마다 후보를 최대 2명까지 확인해요.</p>
+              <section
+                className={`connection-section ${isSuccessfulMatchingComplete ? 'connection-section--compact' : ''}`}
+                aria-label={isSuccessfulMatchingComplete ? '작업별 도우미 연결 상태' : undefined}
+                aria-labelledby={isSuccessfulMatchingComplete ? undefined : 'connection-heading'}
+              >
+                {!isSuccessfulMatchingComplete && (
+                  <>
+                    <h2 id="connection-heading">
+                      {plan ? `도우미 ${plan.tasks.length}명에게 나눠 요청해요` : '요청을 안전하게 나누고 있어요'}
+                    </h2>
+                    <p>같은 시각에 겹친 일은 여러 이웃에게 나눠 요청하며, 작업마다 후보를 최대 2명까지 확인해요.</p>
+                  </>
+                )}
 
                 <div className="connection-list">
                   {plan?.candidateQueues.map((queue, index) => {
@@ -486,7 +568,7 @@ export default function App() {
                 </div>
               </section>
 
-              <AgentConsole logs={logs} isLoading={isLoading} completed={isTerminal} errorMessage={errorMessage} />
+              <AgentConsole logs={logs} isLoading={isLoading} completed={agentCompleted} errorMessage={errorMessage} />
               {isTerminal && (
                 <button className="reset-button" type="button" onClick={resetDemo}>새 도움 요청 작성</button>
               )}
@@ -502,11 +584,6 @@ export default function App() {
               <p className="section-kicker section-kicker--light">도우미 화면</p>
               <h2 id="helpers-heading">가까운 이웃에게<br />요청이 도착합니다</h2>
             </div>
-            {plan && (
-              <div className="match-count" aria-label={`${plan.tasks.length}개 작업 연결 중`}>
-                <strong>{plan.tasks.length}</strong><span>개 작업</span>
-              </div>
-            )}
           </header>
 
           {!plan ? (
@@ -517,15 +594,24 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div className="plan-summary"><span>요청 분석 완료</span><p>{plan.requestSummary}</p></div>
+              {!allRequestsCompleted && (
+                <div className="plan-summary"><span>요청 분석 완료</span><p>{plan.requestSummary}</p></div>
+              )}
               <div className="helper-list">
                 {activeAssignments.map(({ assignment, connection }) => (
                   <HelperCard
                     key={assignment.task.taskId}
                     assignment={assignment}
-                    status={connection.status === 'accepted' ? 'accepted' : 'pending'}
+                    status={
+                      connection.status === 'completed'
+                        ? 'completed'
+                        : connection.status === 'accepted'
+                          ? 'accepted'
+                          : 'pending'
+                    }
                     attempt={connection.candidateIndex + 1}
                     onRespond={(response) => handleHelperResponse(assignment.task.taskId, response)}
+                    onRequestComplete={() => handleRequestComplete(assignment.task.taskId)}
                   />
                 ))}
               </div>

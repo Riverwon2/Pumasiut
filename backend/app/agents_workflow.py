@@ -7,11 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agents import Agent, RunContextWrapper, Runner, function_tool
+from agents.stream_events import RunItemStreamEvent
+from fastapi.encoders import jsonable_encoder
 
 from app.matching import build_assignment_plan, load_candidates
 from app.models import AssignmentPlan, CoordinatorResult, HelpRequest, TaskPlan
 
 EventEmitter = Callable[[str, dict[str, object]], Awaitable[None]]
+RAW_API_STREAM_LOG = Path(__file__).resolve().parents[1] / "logs" / "raw-api-stream.jsonl"
 
 
 PLANNER_INSTRUCTIONS = """
@@ -63,6 +66,44 @@ def build_planner_input(request: HelpRequest) -> str:
         "다음 요청을 작업으로 분리하세요. UI에서 선택된 date, startTime, endTime은 "
         "자연어보다 우선하는 확정값입니다.\n" + json.dumps(payload, ensure_ascii=False)
     )
+
+
+def raw_tool_stream_payload(event: RunItemStreamEvent) -> dict[str, object] | None:
+    """Return the full SDK raw item without selecting or rewriting its fields."""
+    event_types = {
+        "tool_called": "tool_call",
+        "tool_output": "tool_result",
+    }
+    event_type = event_types.get(event.name)
+    if event_type is None:
+        return None
+
+    return {
+        "type": event_type,
+        "sdkEvent": event.name,
+        "data": jsonable_encoder(event.item.raw_item),
+    }
+
+
+def prepare_raw_api_stream_log(path: Path = RAW_API_STREAM_LOG) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch(exist_ok=True)
+
+
+def reset_raw_api_stream_log(path: Path = RAW_API_STREAM_LOG) -> None:
+    prepare_raw_api_stream_log(path)
+    path.write_text("", encoding="utf-8")
+
+
+def append_raw_api_stream_event(
+    payload: dict[str, object],
+    path: Path = RAW_API_STREAM_LOG,
+) -> None:
+    prepare_raw_api_stream_log(path)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        stream.write("\n")
+        stream.flush()
 
 
 def create_workflow_agents() -> Agent[WorkflowContext]:
@@ -125,6 +166,7 @@ async def run_workflow(
     candidates_path: Path,
     emit: EventEmitter,
 ) -> AssignmentPlan:
+    reset_raw_api_stream_log()
     context = WorkflowContext(request=request, candidates_path=candidates_path, emit=emit)
     await context.phase("도움 요청을 접수했어요.")
 
@@ -139,9 +181,12 @@ async def run_workflow(
         max_turns=8,
     )
 
-    async for _event in stream.stream_events():
-        # Raw model events are intentionally not forwarded to the user interface.
-        pass
+    async for event in stream.stream_events():
+        if not isinstance(event, RunItemStreamEvent):
+            continue
+        payload = raw_tool_stream_payload(event)
+        if payload is not None:
+            append_raw_api_stream_event(payload)
 
     if context.assignment_plan is None:
         raise RuntimeError("에이전트가 도우미 배정 단계를 완료하지 못했습니다.")
