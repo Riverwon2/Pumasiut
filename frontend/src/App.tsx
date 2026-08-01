@@ -1,6 +1,6 @@
 import { type FormEvent, useMemo, useRef, useState } from 'react'
 
-import { streamHelpRequest } from './api'
+import { matchConfirmedTask, streamHelpRequest } from './api'
 import type {
   Assignment,
   AssignmentPlan,
@@ -27,7 +27,7 @@ const orbitHeartPositions = [
 
 interface TaskConnection {
   candidateIndex: number
-  status: 'waiting' | 'accepted' | 'unmatched'
+  status: 'waiting' | 'accepted' | 'unmatched' | 'confirmation_required' | 'searching'
   retried: boolean
 }
 
@@ -72,7 +72,7 @@ function validate(input: HelpRequestInput): FormErrors {
 
 function CareFace({ stage }: { readonly stage: RequesterDemoStage }) {
   const settled = ['matched', 'partially_matched'].includes(stage)
-  const stopped = ['unmatched', 'failed'].includes(stage)
+  const stopped = ['unmatched', 'emergency', 'safety_excluded', 'failed'].includes(stage)
 
   return (
     <div
@@ -98,11 +98,13 @@ function AgentConsole({
   logs,
   isLoading,
   completed,
+  waitingForReview,
   errorMessage,
 }: {
   logs: string[]
   isLoading: boolean
   completed: boolean
+  waitingForReview: boolean
   errorMessage: string
 }) {
   return (
@@ -112,7 +114,9 @@ function AgentConsole({
           <span className={`agent-orb ${isLoading ? 'agent-orb--active' : ''}`} aria-hidden="true" />
           <h2 id="agent-heading">에이전트 처리 현황</h2>
         </div>
-        <span>{isLoading ? '처리 중' : completed ? '완료' : '대기 중'}</span>
+        <span>
+          {isLoading ? '처리 중' : waitingForReview ? '확인 필요' : completed ? '완료' : '대기 중'}
+        </span>
       </div>
 
       {logs.length === 0 && !errorMessage ? (
@@ -133,6 +137,20 @@ function AgentConsole({
 }
 
 function connectionCopy(queue: TaskCandidateQueue, connection: TaskConnection | undefined) {
+  if (connection?.status === 'confirmation_required') {
+    return {
+      title: '주의가 필요한 요청입니다',
+      badge: '확인 필요',
+      tone: 'caution',
+    }
+  }
+  if (connection?.status === 'searching') {
+    return {
+      title: '확인된 요청의 도우미를 찾고 있어요',
+      badge: '검색 중',
+      tone: 'caution',
+    }
+  }
   if (!connection || connection.status === 'waiting') {
     const candidate = queue.candidates[connection?.candidateIndex ?? 0]
     return {
@@ -228,7 +246,14 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null)
 
   const isLoading = stage === 'matching' && !plan
-  const isTerminal = ['matched', 'partially_matched', 'unmatched', 'failed'].includes(stage)
+  const isTerminal = [
+    'matched',
+    'partially_matched',
+    'unmatched',
+    'emergency',
+    'safety_excluded',
+    'failed',
+  ].includes(stage)
 
   const activeAssignments = useMemo(() => {
     if (!plan) return []
@@ -248,6 +273,18 @@ export default function App() {
     })
   }, [connections, plan])
 
+  const pendingApprovals = useMemo(() => {
+    if (!plan) return []
+    return plan.candidateQueues.filter((queue) => {
+      const status = connections[queue.task.taskId]?.status
+      return status === 'confirmation_required' || status === 'searching'
+    })
+  }, [connections, plan])
+
+  const isConfirmingMidTask = pendingApprovals.some(
+    (queue) => connections[queue.task.taskId]?.status === 'searching',
+  )
+
   const updateForm = (field: keyof HelpRequestInput, value: string) => {
     setForm((current) => ({ ...current, [field]: value }))
     setErrors((current) => ({ ...current, [field]: undefined, time: undefined }))
@@ -261,9 +298,14 @@ export default function App() {
     candidatePlan: AssignmentPlan,
     nextConnections: Record<string, TaskConnection>,
   ): RequesterDemoStage => {
+    if (candidatePlan.safety.emergencyBlocked) return 'emergency'
+    if (candidatePlan.tasks.length === 0) return 'safety_excluded'
     const states = candidatePlan.candidateQueues.map(
       (queue) => nextConnections[queue.task.taskId]?.status ?? 'unmatched',
     )
+    if (states.some((state) => state === 'confirmation_required' || state === 'searching')) {
+      return 'review_required'
+    }
     if (states.some((state) => state === 'waiting')) return 'matching'
     const accepted = states.filter((state) => state === 'accepted').length
     if (accepted === states.length && accepted > 0) return 'matched'
@@ -283,7 +325,11 @@ export default function App() {
           queue.task.taskId,
           {
             candidateIndex: 0,
-            status: queue.candidates.length > 0 ? 'waiting' : 'unmatched',
+            status: queue.task.riskLevel === 'mid'
+              ? 'confirmation_required'
+              : queue.candidates.length > 0
+                ? 'waiting'
+                : 'unmatched',
             retried: false,
           } satisfies TaskConnection,
         ]),
@@ -355,6 +401,66 @@ export default function App() {
     })
   }
 
+  const handleConfirmMidTask = async (taskId: string) => {
+    if (!plan || isConfirmingMidTask) return
+    const queue = plan.candidateQueues.find((item) => item.task.taskId === taskId)
+    if (!queue || queue.task.riskLevel !== 'mid') return
+
+    setErrorMessage('')
+    setConnections((current) => ({
+      ...current,
+      [taskId]: {
+        ...(current[taskId] ?? { candidateIndex: 0, retried: false }),
+        status: 'searching',
+      },
+    }))
+    appendLog(`${queue.task.title} 작업을 다시 확인하고 도우미 검색을 시작했어요.`)
+
+    const excludedCandidateIds = plan.candidateQueues.flatMap((item) =>
+      item.candidates.map((candidate) => candidate.helper.candidateId),
+    )
+
+    try {
+      const matchedQueue = await matchConfirmedTask(
+        form.requesterName,
+        queue.task,
+        excludedCandidateIds,
+      )
+      const nextPlan = {
+        ...plan,
+        candidateQueues: plan.candidateQueues.map((item) =>
+          item.task.taskId === taskId ? matchedQueue : item,
+        ),
+      }
+      const nextConnection: TaskConnection = {
+        candidateIndex: 0,
+        status: matchedQueue.candidates.length > 0 ? 'waiting' : 'unmatched',
+        retried: false,
+      }
+      setPlan(nextPlan)
+      setConnections((current) => {
+        const next = { ...current, [taskId]: nextConnection }
+        setStage(stageFromConnections(nextPlan, next))
+        return next
+      })
+      appendLog(
+        matchedQueue.candidates.length > 0
+          ? `${queue.task.title} 작업의 도우미 후보를 찾았어요.`
+          : `${queue.task.title} 작업에 가능한 지원자가 없어요.`,
+      )
+    } catch (error) {
+      setConnections((current) => ({
+        ...current,
+        [taskId]: {
+          ...(current[taskId] ?? { candidateIndex: 0, retried: false }),
+          status: 'confirmation_required',
+        },
+      }))
+      setErrorMessage((error as Error).message)
+      setStage('review_required')
+    }
+  }
+
   const resetDemo = () => {
     abortRef.current?.abort()
     setStage('form')
@@ -369,9 +475,11 @@ export default function App() {
       <section className="requester-panel" aria-labelledby="requester-heading">
         <div className="panel-inner panel-inner--requester">
           <header className="brand-row">
-            <a className="brand" href="#top" aria-label="곁 홈">
-              <span className="brand-symbol" aria-hidden="true">곁</span>
-              <span>생활지원 연결</span>
+            <a className="brand" href="#top" aria-label="품앗이웃 홈">
+              <div className="brand-care-face">
+                <CareFace stage={stage} />
+              </div>
+              <span className="brand-name">품앗이웃</span>
             </a>
             <span className="demo-badge"><i aria-hidden="true" /> LIVE DEMO</span>
           </header>
@@ -442,17 +550,28 @@ export default function App() {
           ) : (
             <div className="request-status-view" id="top">
               <div className="care-hero">
-                <CareFace stage={stage} />
                 <p className="section-kicker">도움 신청 현황</p>
                 <h1 id="requester-heading">
-                  {stage === 'unmatched' || stage === 'failed'
+                  {stage === 'emergency'
+                    ? '지금은 긴급 도움을 먼저 요청해주세요'
+                    : stage === 'safety_excluded'
+                      ? '연결할 수 있는 요청이 없어요'
+                      : stage === 'review_required'
+                        ? '확인이 필요한 요청이 있어요'
+                        : stage === 'unmatched' || stage === 'failed'
                     ? '연결 결과를 확인해주세요'
                     : stage === 'matched'
                       ? '도움을 줄 이웃을 찾았어요'
                       : '도움을 요청할 이웃을 찾고 있어요'}
                 </h1>
                 <p>
-                  {isTerminal
+                  {stage === 'emergency'
+                    ? '이웃 찾기를 중단했어요. 오른쪽의 119 전화 연결을 이용해주세요.'
+                    : stage === 'safety_excluded'
+                      ? '위험하거나 생활·정서지원으로 보기 어려운 내용은 도우미에게 전달하지 않아요.'
+                      : stage === 'review_required'
+                        ? '주의가 필요한 작업은 사용자가 확인하기 전까지 도우미를 찾지 않아요.'
+                        : isTerminal
                     ? '각 작업의 최종 연결 상태를 아래에서 확인할 수 있어요.'
                     : '가까이 있고 시간이 맞는 이웃에게 차례대로 요청하고 있어요.'}
                 </p>
@@ -460,16 +579,63 @@ export default function App() {
 
               <section className="connection-section" aria-labelledby="connection-heading">
                 <h2 id="connection-heading">
-                  {plan ? `도우미 ${plan.tasks.length}명에게 나눠 요청해요` : '요청을 안전하게 나누고 있어요'}
+                  {stage === 'emergency'
+                    ? '긴급 요청으로 분류됐어요'
+                    : stage === 'safety_excluded'
+                      ? '안전 게이트에서 처리를 마쳤어요'
+                      : plan
+                        ? `${plan.tasks.length}개 작업을 확인했어요`
+                        : '요청의 안전성을 먼저 확인하고 있어요'}
                 </h2>
-                <p>같은 시각에 겹친 일은 여러 이웃에게 나눠 요청하며, 작업마다 후보를 최대 2명까지 확인해요.</p>
+                <p>
+                  안전 확인을 통과한 작업만 분해하며, 주의 작업은 재확인 후 후보를 최대 2명까지 찾아요.
+                </p>
+
+                {plan && (
+                  <div className="safety-summary" aria-label="안전 게이트 결과">
+                    {!plan.safety.emergencyBlocked && plan.safety.highDiscardedCount > 0 && (
+                      <p className="safety-summary__item safety-summary__item--blocked">
+                        <strong>위험 요청 제외</strong>
+                        일반 이웃에게 맡기기 어려운 요청 {plan.safety.highDiscardedCount}개를 폐기했어요.
+                      </p>
+                    )}
+                    {!plan.safety.emergencyBlocked && plan.safety.notActionableCount > 0 && (
+                      <p className="safety-summary__item">
+                        <strong>지원 범위 확인</strong>
+                        생활·정서지원으로 보기 어려운 내용 {plan.safety.notActionableCount}개를 제외했어요.
+                      </p>
+                    )}
+                    {!plan.safety.emergencyBlocked && pendingApprovals.map((queue) => {
+                      const searching = connections[queue.task.taskId]?.status === 'searching'
+                      return (
+                        <div
+                          className="safety-summary__item safety-summary__item--caution"
+                          key={`approval-${queue.task.taskId}`}
+                        >
+                          <div className="safety-summary__content">
+                            <strong>사용자 확인 필요 · {queue.task.title}</strong>
+                            <span>주의가 필요한 요청입니다. 확인 전까지 도우미를 검색하지 않아요.</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="safety-summary__action"
+                            disabled={isConfirmingMidTask}
+                            onClick={() => handleConfirmMidTask(queue.task.taskId)}
+                          >
+                            {searching ? '도우미 찾는 중…' : '그래도 도움 요청'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
 
                 <div className="connection-list">
                   {plan?.candidateQueues.map((queue, index) => {
                     const copy = connectionCopy(queue, connections[queue.task.taskId])
                     return (
                       <article className={`connection-row connection-row--${copy.tone}`} key={queue.task.taskId}>
-                        <span className="connection-label">도우미 {index + 1}</span>
+                        <span className="connection-label">작업 {index + 1}</span>
                         <div className="connection-main">
                           <h3>{copy.title}</h3>
                           <p>{queue.task.title}</p>
@@ -486,7 +652,13 @@ export default function App() {
                 </div>
               </section>
 
-              <AgentConsole logs={logs} isLoading={isLoading} completed={isTerminal} errorMessage={errorMessage} />
+              <AgentConsole
+                logs={logs}
+                isLoading={isLoading}
+                waitingForReview={stage === 'review_required'}
+                completed={isTerminal}
+                errorMessage={errorMessage}
+              />
               {isTerminal && (
                 <button className="reset-button" type="button" onClick={resetDemo}>새 도움 요청 작성</button>
               )}
@@ -502,14 +674,34 @@ export default function App() {
               <p className="section-kicker section-kicker--light">도우미 화면</p>
               <h2 id="helpers-heading">가까운 이웃에게<br />요청이 도착합니다</h2>
             </div>
-            {plan && (
-              <div className="match-count" aria-label={`${plan.tasks.length}개 작업 연결 중`}>
-                <strong>{plan.tasks.length}</strong><span>개 작업</span>
+            {activeAssignments.length > 0 && (
+              <div className="match-count" aria-label={`${activeAssignments.length}개 작업 연결 중`}>
+                <strong>{activeAssignments.length}</strong><span>개 작업</span>
               </div>
             )}
           </header>
 
-          {!plan ? (
+          {plan?.safety.emergencyBlocked ? (
+            <div className="emergency-panel" role="alert">
+              <span className="emergency-icon" aria-hidden="true">119</span>
+              <p className="eyebrow">긴급 요청 감지</p>
+              <h3>이웃 찾기를 중단했어요</h3>
+              <p>
+                의식 없음, 출혈, 쓰러짐 등 긴급 상황일 수 있어요.
+                이 서비스 대신 119에 즉시 도움을 요청해주세요.
+              </p>
+              <a className="emergency-call" href="tel:119">119 전화 연결</a>
+            </div>
+          ) : plan && plan.tasks.length === 0 ? (
+            <div className="safety-stopped-panel" role="status">
+              <span aria-hidden="true">!</span>
+              <h3>도우미에게 전달하지 않았어요</h3>
+              <p>
+                위험한 요청 또는 생활·정서지원으로 보기 어려운 내용만 확인되어
+                후보 검색을 시작하지 않았습니다.
+              </p>
+            </div>
+          ) : !plan ? (
             <div className={`helper-empty ${stage === 'matching' ? 'helper-empty--loading' : ''}`}>
               <div className="empty-radar" aria-hidden="true"><span /><span /><i>+</i></div>
               <h3>{stage === 'matching' ? '도우미 후보를 살펴보고 있어요' : '도움 요청을 기다리고 있어요'}</h3>
@@ -517,7 +709,12 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div className="plan-summary"><span>요청 분석 완료</span><p>{plan.requestSummary}</p></div>
+              {activeAssignments.length > 0 && (
+                <div className="plan-summary">
+                  <span>요청 도착</span>
+                  <p>안전 확인과 사용자 승인이 완료된 요청만 표시합니다.</p>
+                </div>
+              )}
               <div className="helper-list">
                 {activeAssignments.map(({ assignment, connection }) => (
                   <HelperCard
@@ -529,7 +726,14 @@ export default function App() {
                   />
                 ))}
               </div>
-              {activeAssignments.length === 0 && (
+              {activeAssignments.length === 0 && pendingApprovals.length > 0 && (
+                <div className="helper-empty helper-empty--review" role="status">
+                  <div className="empty-radar" aria-hidden="true"><span /><span /><i>+</i></div>
+                  <h3>요청자의 확인을 기다리고 있어요</h3>
+                  <p>확인이 완료되면 도우미에게 요청이 표시됩니다.</p>
+                </div>
+              )}
+              {activeAssignments.length === 0 && pendingApprovals.length === 0 && (
                 <div className="all-responses-finished" role="status">
                   <span aria-hidden="true">✓</span>
                   <h3>모든 응답 확인이 끝났어요</h3>
