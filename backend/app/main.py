@@ -13,9 +13,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.agents_workflow import run_workflow
-from app.matching import build_confirmed_mid_queue, load_candidates
-from app.models import ConfirmMidMatchRequest, HealthResponse, HelpRequest, TaskCandidateQueue
+from app.agents_workflow import prepare_raw_api_stream_log, run_workflow
+from app.matching import build_confirmed_task_queue, load_candidates
+from app.models import ConfirmTaskMatchRequest, HealthResponse, HelpRequest, TaskCandidateQueue
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -101,9 +101,9 @@ async def stream_request(request: HelpRequest) -> StreamingResponse:
 
 
 @app.post("/api/tasks/confirm-match", response_model=TaskCandidateQueue)
-async def confirm_mid_task(request: ConfirmMidMatchRequest) -> TaskCandidateQueue:
+async def confirm_task(request: ConfirmTaskMatchRequest) -> TaskCandidateQueue:
     candidates = load_candidates(CANDIDATES_PATH)
-    return build_confirmed_mid_queue(
+    return build_confirmed_task_queue(
         requester_name=request.requester_name,
         task=request.task,
         candidates=candidates,
@@ -112,5 +112,6 @@ async def confirm_mid_task(request: ConfirmMidMatchRequest) -> TaskCandidateQueu
 
 
 def run() -> None:
+    prepare_raw_api_stream_log()
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=False)

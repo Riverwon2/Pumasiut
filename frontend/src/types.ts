@@ -12,9 +12,14 @@ export interface PlannedTask {
   title: string
   description: string
   date: string
-  startTime: string
-  endTime: string
+  startTime: string | null
+  endTime: string | null
   riskLevel: TaskRiskLevel
+  scheduleSource?: 'ui_default' | 'natural_language' | 'user_confirmed'
+  timeConstraintType?: 'window' | 'appointment' | 'deadline'
+  targetTime?: string | null
+  timeSourceText?: string | null
+  scheduleNeedsConfirmation?: boolean
 }
 
 export type TaskRiskLevel = 'low' | 'mid'
@@ -67,12 +72,23 @@ export type StreamEvent =
 
 export type ResponseStatus = 'pending' | 'accepted' | 'declined'
 
+export type TaskConnectionStatus =
+  | 'waiting'
+  | 'accepted'
+  | 'completed'
+  | 'unmatched'
+  | 'confirmation_required'
+  | 'schedule_required'
+  | 'searching'
+
 export type RequesterDemoStage =
   | 'form'
   | 'matching'
   | 'review_required'
   | 'matched'
   | 'partially_matched'
+  | 'completed'
+  | 'partially_completed'
   | 'unmatched'
   | 'emergency'
   | 'safety_excluded'

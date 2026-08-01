@@ -2,7 +2,7 @@ from datetime import date
 
 from app.matching import (
     build_assignment_plan,
-    build_confirmed_mid_queue,
+    build_confirmed_task_queue,
     choose_helpers,
     is_available,
 )
@@ -120,10 +120,30 @@ def test_mid_task_is_not_searched_before_confirmation() -> None:
 
 def test_confirmed_mid_task_searches_two_new_candidates() -> None:
     mid_task = task().model_copy(update={"risk_level": "mid"})
-    queue = build_confirmed_mid_queue(
+    queue = build_confirmed_task_queue(
         "김하늘",
         mid_task,
         [candidate("used", 50, 30), candidate("a", 100, 10), candidate("b", 200, 20)],
         {"used"},
     )
     assert [option.helper.candidate_id for option in queue.candidates] == ["a", "b"]
+
+
+def test_incomplete_schedule_is_not_searched_before_confirmation() -> None:
+    incomplete_task = task().model_copy(
+        update={
+            "start_time": None,
+            "end_time": None,
+            "schedule_source": "natural_language",
+            "time_constraint_type": "deadline",
+            "target_time": "10:00",
+            "schedule_needs_confirmation": True,
+        }
+    )
+    plan = build_assignment_plan(
+        "김하늘",
+        TaskPlan(request_summary="요약", tasks=[incomplete_task]),
+        [candidate("a", 100, 10)],
+    )
+    assert plan.candidate_queues[0].candidates == []
+    assert plan.unassigned_task_ids == []

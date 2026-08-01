@@ -11,4 +11,4 @@ node_modules/
 dist/
 .vite/
 *.log
-
+backend/logs/*.jsonl

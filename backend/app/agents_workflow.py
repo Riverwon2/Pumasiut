@@ -15,6 +15,8 @@ from agents import (
     function_tool,
     input_guardrail,
 )
+from agents.stream_events import RunItemStreamEvent
+from fastapi.encoders import jsonable_encoder
 
 from app.matching import build_assignment_plan, load_candidates
 from app.models import (
@@ -26,8 +28,14 @@ from app.models import (
     TaskPlan,
 )
 from app.safety import SafetyPolicyDecision, enforce_safety_policy
+from app.scheduling import (
+    apply_task_schedule_policy,
+    extract_explicit_times,
+    uncovered_explicit_times,
+)
 
 EventEmitter = Callable[[str, dict[str, object]], Awaitable[None]]
+RAW_API_STREAM_LOG = Path(__file__).resolve().parents[1] / "logs" / "raw-api-stream.jsonl"
 
 
 SAFETY_INSTRUCTIONS = """
@@ -51,7 +59,8 @@ SAFETY_INSTRUCTIONS = """
 - 안내견을 동물병원으로 이동시키는 요청은 사람 대상 의료행위가 아니므로 low다.
 
 혼합 입력은 문장 또는 요청 의도별로 나누어 각각 finding을 만든다. sourceText에는
-판정에 필요한 최소 원문 구간만 담고, findingId는 finding-1부터 순서대로 부여한다.
+판정에 필요한 최소 원문 구간과 그 요청에 연결된 예약·마감·시간 범위 표현을 빠짐없이
+함께 담고, findingId는 finding-1부터 순서대로 부여한다.
 모호할 때는 더 안전한 높은 등급을 선택한다. 한국어로 작성하고 구조화 출력만 반환한다.
 """.strip()
 
@@ -62,8 +71,16 @@ PLANNER_INSTRUCTIONS = """
 성공 기준:
 - 요청을 서로 다른 도우미가 맡을 수 있는 독립 작업 1~3개로 분리한다.
 - 각 작업은 짧은 제목과 구체적인 설명을 가진다.
-- 입력에 제공된 UI 날짜, 시작 시간, 종료 시간을 모든 작업에 그대로 사용한다.
-- 자연어 속 날짜나 시간이 UI 값과 충돌해도 절대 UI 값을 변경하지 않는다.
+- UI 날짜는 모든 작업의 확정 날짜로 사용한다.
+- 작업에 자연어 시각이 명시되어 있으면 UI 시간보다 우선하여 반드시 보존한다.
+- 자연어에 시작·종료가 모두 있는 시간 범위는 scheduleSource='natural_language',
+  timeConstraintType='window'으로 설정하고 startTime과 endTime을 그대로 정규화한다.
+- 예약 시각처럼 한 시점만 있으면 timeConstraintType='appointment', 마감 표현이면
+  timeConstraintType='deadline'으로 설정한다. targetTime과 timeSourceText를 보존하고
+  startTime/endTime은 비워 scheduleNeedsConfirmation=true로 설정한다.
+- 자연어 시각이 전혀 없는 작업만 scheduleSource='ui_default'로 설정한다. 이 경우
+  입력의 UI startTime/endTime을 사용하고 scheduleNeedsConfirmation=false로 설정한다.
+- 불완전한 시간 범위나 이동 시간을 추정하거나 만들어내지 않는다.
 - 자연어의 유용한 상황 정보는 설명에 통합하되 새로운 개인정보나 의료 사실을 만들지 않는다.
 - approvedRequests에 없는 요청은 절대 작업으로 만들지 않는다.
 - approvedRequests의 모든 항목을 반드시 최소 1개의 작업으로 반영한다.
@@ -117,20 +134,63 @@ def build_planner_input(
     request: HelpRequest,
     approved_findings: tuple[SafetyFinding, ...],
 ) -> str:
+    approved_source_text = "\n".join(finding.source_text for finding in approved_findings)
     payload = {
         "requesterName": request.requester_name,
         "date": request.date.isoformat(),
-        "startTime": request.start_time,
-        "endTime": request.end_time,
+        "uiDefaultTime": {
+            "startTime": request.start_time,
+            "endTime": request.end_time,
+        },
+        "explicitTimes": list(extract_explicit_times(approved_source_text)),
         "approvedRequests": [
             finding.model_dump(mode="json", by_alias=True) for finding in approved_findings
         ],
     }
     return (
-        "안전 게이트가 승인한 요청만 작업으로 분리하세요. UI에서 선택된 date, "
-        "startTime, endTime은 "
-        "자연어보다 우선하는 확정값입니다.\n" + json.dumps(payload, ensure_ascii=False)
+        "안전 게이트가 승인한 요청만 작업으로 분리하세요. UI date는 확정값이지만 "
+        "UI 시간은 자연어 시각이 없는 작업에만 사용하는 기본값입니다. explicitTimes의 "
+        "모든 시각을 관련 작업의 자연어 시간 필드에 반드시 보존하세요.\n"
+        + json.dumps(payload, ensure_ascii=False)
     )
+
+
+def raw_tool_stream_payload(event: RunItemStreamEvent) -> dict[str, object] | None:
+    """Return the full SDK raw item without selecting or rewriting its fields."""
+    event_types = {
+        "tool_called": "tool_call",
+        "tool_output": "tool_result",
+    }
+    event_type = event_types.get(event.name)
+    if event_type is None:
+        return None
+
+    return {
+        "type": event_type,
+        "sdkEvent": event.name,
+        "data": jsonable_encoder(event.item.raw_item),
+    }
+
+
+def prepare_raw_api_stream_log(path: Path = RAW_API_STREAM_LOG) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch(exist_ok=True)
+
+
+def reset_raw_api_stream_log(path: Path = RAW_API_STREAM_LOG) -> None:
+    prepare_raw_api_stream_log(path)
+    path.write_text("", encoding="utf-8")
+
+
+def append_raw_api_stream_event(
+    payload: dict[str, object],
+    path: Path = RAW_API_STREAM_LOG,
+) -> None:
+    prepare_raw_api_stream_log(path)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        stream.write("\n")
+        stream.flush()
 
 
 def create_workflow_agents() -> Agent[WorkflowContext]:
@@ -203,6 +263,24 @@ def create_workflow_agents() -> Agent[WorkflowContext]:
         await wrapper.context.phase("요청 내용을 확인하고 있어요.")
         approved_findings = wrapper.context.safety_decision.allowed_findings[:3]
         planner_input = build_planner_input(wrapper.context.request, approved_findings)
+        explicit_times_by_finding = {
+            finding.finding_id: extract_explicit_times(finding.source_text)
+            for finding in approved_findings
+        }
+
+        def missing_schedule_times(task_plan: TaskPlan) -> set[str]:
+            return {
+                time
+                for finding_id, finding_times in explicit_times_by_finding.items()
+                for time in uncovered_explicit_times(
+                    finding_times,
+                    (
+                        task
+                        for task in task_plan.tasks
+                        if task.safety_finding_id == finding_id
+                    ),
+                )
+            }
         allowed_levels = {
             finding.finding_id: finding.classification
             for finding in approved_findings
@@ -223,25 +301,48 @@ def create_workflow_agents() -> Agent[WorkflowContext]:
                 expected_level = allowed_levels.get(task.safety_finding_id)
                 if expected_level not in {"low", "mid"}:
                     raise RuntimeError("안전 게이트에서 승인하지 않은 작업이 포함됐습니다.")
-                normalized_tasks.append(task.model_copy(update={"risk_level": expected_level}))
+                normalized_tasks.append(
+                    apply_task_schedule_policy(
+                        task.model_copy(update={"risk_level": expected_level}),
+                        wrapper.context.request,
+                    )
+                )
             return output.model_copy(update={"tasks": normalized_tasks})
 
         task_plan = await run_planner(planner_input)
         covered_ids = {task.safety_finding_id for task in task_plan.tasks}
         missing_ids = set(allowed_levels) - covered_ids
-        if missing_ids:
-            await wrapper.context.phase("누락된 안전 승인 요청을 다시 확인하고 있어요.")
+        missing_times = missing_schedule_times(task_plan)
+        if missing_ids or missing_times:
+            await wrapper.context.phase("누락된 요청과 시간 정보를 다시 확인하고 있어요.")
+            retry_requirements = []
+            if missing_ids:
+                retry_requirements.append(
+                    "다음 findingId를 각각 반드시 작업에 포함하세요: "
+                    + ", ".join(sorted(missing_ids))
+                )
+            if missing_times:
+                retry_requirements.append(
+                    "다음 자연어 시각을 관련 작업에 반드시 보존하세요: "
+                    + ", ".join(sorted(missing_times))
+                )
             task_plan = await run_planner(
                 planner_input
-                + "\n이전 결과에서 다음 findingId가 누락됐습니다. 각각을 반드시 작업에 "
-                + f"포함하세요: {', '.join(sorted(missing_ids))}"
+                + "\n이전 결과에 누락이 있습니다. "
+                + " ".join(retry_requirements)
             )
             covered_ids = {task.safety_finding_id for task in task_plan.tasks}
             if set(allowed_levels) - covered_ids:
                 raise RuntimeError("안전 게이트가 승인한 요청을 모두 작업으로 만들지 못했습니다.")
+            missing_times = missing_schedule_times(task_plan)
+            if missing_times:
+                raise RuntimeError("자연어에 명시된 작업 시각을 모두 보존하지 못했습니다.")
         wrapper.context.task_plan = task_plan
         await wrapper.context.phase(f"{len(task_plan.tasks)}개의 작업이 필요한 것으로 파악했어요.")
-        await wrapper.context.phase("선택한 날짜와 시간을 작업에 적용했어요.")
+        if any(task.schedule_needs_confirmation for task in task_plan.tasks):
+            await wrapper.context.phase("시작·종료 확인이 필요한 작업 시간을 보존했어요.")
+        else:
+            await wrapper.context.phase("작업별 날짜와 시간을 적용했어요.")
         return task_plan.model_dump_json(by_alias=True)
 
     @function_tool
@@ -252,7 +353,9 @@ def create_workflow_agents() -> Agent[WorkflowContext]:
         if wrapper.context.safety_decision is None:
             raise RuntimeError("도우미 검색 전에 안전성 확인이 필요합니다.")
         low_task_ids = {
-            task.task_id for task in wrapper.context.task_plan.tasks if task.risk_level == "low"
+            task.task_id
+            for task in wrapper.context.task_plan.tasks
+            if task.risk_level == "low" and not task.schedule_needs_confirmation
         }
         candidates = []
         if low_task_ids:
@@ -289,6 +392,7 @@ async def run_workflow(
     candidates_path: Path,
     emit: EventEmitter,
 ) -> AssignmentPlan:
+    reset_raw_api_stream_log()
     context = WorkflowContext(request=request, candidates_path=candidates_path, emit=emit)
     await context.phase("도움 요청을 접수했어요.")
 
@@ -301,9 +405,14 @@ async def run_workflow(
     )
 
     try:
-        async for _event in stream.stream_events():
-            # Raw model events are intentionally not forwarded to the user interface.
-            pass
+        async for event in stream.stream_events():
+            # Raw tool events are written verbatim to the judge-facing JSONL log,
+            # while the user interface continues to receive only public phase events.
+            if not isinstance(event, RunItemStreamEvent):
+                continue
+            payload = raw_tool_stream_payload(event)
+            if payload is not None:
+                append_raw_api_stream_event(payload)
     except InputGuardrailTripwireTriggered:
         if context.safety_decision is None:
             raise RuntimeError("안전 게이트가 요청 처리를 중단했습니다.") from None
@@ -323,8 +432,11 @@ async def run_workflow(
     if context.assignment_plan is None:
         raise RuntimeError("에이전트가 도우미 배정 단계를 완료하지 못했습니다.")
 
-    if context.assignment_plan.safety.mid_confirmation_count:
-        await context.phase("일반 요청의 추천을 완료하고 주의 요청의 확인을 기다려요.")
+    schedule_confirmation_count = sum(
+        task.schedule_needs_confirmation for task in context.assignment_plan.tasks
+    )
+    if context.assignment_plan.safety.mid_confirmation_count or schedule_confirmation_count:
+        await context.phase("일반 요청의 추천을 완료하고 확인이 필요한 요청을 기다려요.")
     else:
         await context.phase("도우미 추천을 완료했어요.")
     return context.assignment_plan

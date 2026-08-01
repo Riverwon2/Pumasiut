@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 TimeText = Annotated[str, StringConstraints(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")]
 SafetyClassification = Literal["low", "mid", "high", "emergency", "not_actionable"]
 TaskRiskLevel = Literal["low", "mid"]
+ScheduleSource = Literal["ui_default", "natural_language", "user_confirmed"]
+TimeConstraintType = Literal["window", "appointment", "deadline"]
 
 
 def to_camel(value: str) -> str:
@@ -64,9 +66,26 @@ class PlannedTask(ApiModel):
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=300)
     date: date
-    start_time: TimeText
-    end_time: TimeText
+    start_time: TimeText | None = None
+    end_time: TimeText | None = None
     risk_level: TaskRiskLevel
+    schedule_source: ScheduleSource = "ui_default"
+    time_constraint_type: TimeConstraintType = "window"
+    target_time: TimeText | None = None
+    time_source_text: str | None = Field(default=None, max_length=200)
+    schedule_needs_confirmation: bool = False
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> PlannedTask:
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError("작업 시작 시간과 종료 시간은 함께 입력해야 합니다.")
+        if (
+            self.start_time is not None
+            and self.end_time is not None
+            and self.start_time >= self.end_time
+        ):
+            raise ValueError("작업 종료 시간은 시작 시간보다 늦어야 합니다.")
+        return self
 
 
 class TaskPlan(ApiModel):
@@ -127,15 +146,19 @@ class AssignmentPlan(ApiModel):
     safety: SafetySummary = Field(default_factory=SafetySummary)
 
 
-class ConfirmMidMatchRequest(ApiModel):
+class ConfirmTaskMatchRequest(ApiModel):
     requester_name: str = Field(min_length=1, max_length=40)
     task: PlannedTask
     excluded_candidate_ids: list[str] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
-    def validate_mid_task(self) -> ConfirmMidMatchRequest:
-        if self.task.risk_level != "mid":
-            raise ValueError("주의 요청으로 분류된 작업만 다시 확인할 수 있습니다.")
+    def validate_confirmed_schedule(self) -> ConfirmTaskMatchRequest:
+        if self.task.start_time is None or self.task.end_time is None:
+            raise ValueError("도우미를 찾기 전에 작업 시간을 확인해야 합니다.")
+        if self.task.schedule_needs_confirmation:
+            raise ValueError("확인되지 않은 작업 시간으로는 도우미를 찾을 수 없습니다.")
+        if self.task.risk_level != "mid" and self.task.schedule_source != "user_confirmed":
+            raise ValueError("사용자 확인이 필요한 작업만 다시 매칭할 수 있습니다.")
         return self
 
 

@@ -49,6 +49,28 @@ npm run dev
 브라우저에서 `http://localhost:5173`을 엽니다. 백엔드 상태 확인 주소는
 `http://127.0.0.1:8000/health`입니다.
 
+### 심사용 Raw API Stream
+
+백엔드는 실제 Agents SDK의 `tool_call`·`tool_result` 원본 JSON을 요청마다
+`backend/logs/raw-api-stream.jsonl`에 실시간으로 기록합니다. 두 번째 화면에서 다음
+명령을 실행해 API 도구 호출과 결과를 그대로 확인합니다.
+
+```bash
+tail -f backend/logs/raw-api-stream.jsonl
+```
+
+`jq`가 설치되어 있으면 색상과 들여쓰기를 적용해 더 읽기 좋게 볼 수 있습니다.
+
+```bash
+tail -f backend/logs/raw-api-stream.jsonl | jq --unbuffered -C .
+```
+
+PowerShell에서는 다음 명령을 사용합니다.
+
+```powershell
+Get-Content backend\logs\raw-api-stream.jsonl -Wait
+```
+
 ## 검증
 
 ```powershell
@@ -71,6 +93,7 @@ npm run build
 - 맥락 없는 단순 편의·오락 요청은 작업에서 제외하고 처리 현황에 표시
 - 작업당 서로 다른 도우미 1명, 작업과 도우미 모두 최대 3개
 - 작업마다 후보를 최대 2명까지 순차 제안
+- 수락 후 도우미가 `요청 완료`를 눌러 작업을 `완료됨` 상태로 전환
 - 거부 시 다음 후보를 표시하고, 두 후보가 모두 거부하면 `지원자 없음`으로 종료
 - 재추천, 실제 알림, 로그인, 데이터베이스, 지도 연동은 제외
 - 좌측 처리 창에는 공개 단계 요약만 표시하고 모델의 내부 사고과정은 표시하지 않음
