@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: welfare-helper-api
+    runtime: python
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: uv sync --frozen --no-dev
+    startCommand: uv run uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.6-terra
+      - key: FRONTEND_ORIGIN
+        fromService:
+          type: web
+          name: welfare-helper-web
+          envVarKey: RENDER_EXTERNAL_URL
+
+  - type: web
+    name: welfare-helper-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: frontend/dist
+    autoDeployTrigger: commit
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: welfare-helper-api
+          envVarKey: RENDER_EXTERNAL_URL
