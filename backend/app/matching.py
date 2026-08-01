@@ -12,6 +12,7 @@ from app.models import (
     HelperCandidate,
     HelperSummary,
     PlannedTask,
+    SafetySummary,
     TaskCandidateQueue,
     TaskPlan,
 )
@@ -100,21 +101,36 @@ def build_assignment_plan(
     requester_name: str,
     task_plan: TaskPlan,
     candidates: Sequence[HelperCandidate],
+    *,
+    search_task_ids: set[str] | None = None,
+    safety: SafetySummary | None = None,
 ) -> AssignmentPlan:
     tasks = task_plan.tasks[:3]
-    first_round = choose_helpers(tasks, candidates)
+    searchable_ids = search_task_ids or {
+        task.task_id for task in tasks if task.risk_level == "low"
+    }
+    searchable_tasks = [task for task in tasks if task.task_id in searchable_ids]
+    first_round = choose_helpers(searchable_tasks, candidates)
     first_round_ids = {candidate.candidate_id for candidate in first_round if candidate is not None}
     remaining_candidates = [
         candidate for candidate in candidates if candidate.candidate_id not in first_round_ids
     ]
-    second_round = choose_helpers(tasks, remaining_candidates)
+    second_round = choose_helpers(searchable_tasks, remaining_candidates)
+    first_by_task = dict(zip((task.task_id for task in searchable_tasks), first_round, strict=True))
+    second_by_task = dict(
+        zip((task.task_id for task in searchable_tasks), second_round, strict=True)
+    )
     assignments: list[Assignment] = []
     candidate_queues: list[TaskCandidateQueue] = []
     unassigned_task_ids: list[str] = []
 
-    for task, first_candidate, second_candidate in zip(
-        tasks, first_round, second_round, strict=True
-    ):
+    for task in tasks:
+        if task.task_id not in searchable_ids:
+            candidate_queues.append(TaskCandidateQueue(task=task, candidates=[]))
+            continue
+
+        first_candidate = first_by_task[task.task_id]
+        second_candidate = second_by_task[task.task_id]
         queue_candidates = [
             candidate for candidate in (first_candidate, second_candidate) if candidate is not None
         ]
@@ -156,4 +172,25 @@ def build_assignment_plan(
         assignments=assignments,
         candidate_queues=candidate_queues,
         unassigned_task_ids=unassigned_task_ids,
+        safety=safety or SafetySummary(),
     )
+
+
+def build_confirmed_mid_queue(
+    requester_name: str,
+    task: PlannedTask,
+    candidates: Sequence[HelperCandidate],
+    excluded_candidate_ids: set[str],
+) -> TaskCandidateQueue:
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.candidate_id not in excluded_candidate_ids
+    ]
+    plan = build_assignment_plan(
+        requester_name,
+        TaskPlan(request_summary=task.title, tasks=[task]),
+        eligible_candidates,
+        search_task_ids={task.task_id},
+    )
+    return plan.candidate_queues[0]

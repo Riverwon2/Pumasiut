@@ -1,4 +1,10 @@
-import type { AssignmentPlan, HelpRequestInput, StreamEvent } from './types'
+import type {
+  AssignmentPlan,
+  HelpRequestInput,
+  PlannedTask,
+  StreamEvent,
+  TaskCandidateQueue,
+} from './types'
 
 const API_URL = import.meta.env.VITE_API_URL ?? ''
 
@@ -83,3 +89,19 @@ export async function streamHelpRequest(
   }
 }
 
+export async function matchConfirmedTask(
+  requesterName: string,
+  task: PlannedTask,
+  excludedCandidateIds: string[],
+): Promise<TaskCandidateQueue> {
+  const response = await fetch(`${API_URL}/api/tasks/confirm-match`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requesterName, task, excludedCandidateIds }),
+  })
+
+  if (!response.ok) {
+    throw new Error('주의 요청의 도우미를 찾지 못했습니다.')
+  }
+  return response.json() as Promise<TaskCandidateQueue>
+}

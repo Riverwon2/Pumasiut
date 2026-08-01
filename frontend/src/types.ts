@@ -8,11 +8,24 @@ export interface HelpRequestInput {
 
 export interface PlannedTask {
   taskId: string
+  safetyFindingId: string
   title: string
   description: string
   date: string
   startTime: string
   endTime: string
+  riskLevel: TaskRiskLevel
+}
+
+export type TaskRiskLevel = 'low' | 'mid'
+export type SafetyClassification = TaskRiskLevel | 'high' | 'emergency' | 'not_actionable'
+
+export interface SafetySummary {
+  highestClassification: SafetyClassification
+  emergencyBlocked: boolean
+  highDiscardedCount: number
+  notActionableCount: number
+  midConfirmationCount: number
 }
 
 export interface HelperSummary {
@@ -34,6 +47,7 @@ export interface AssignmentPlan {
   assignments: Assignment[]
   candidateQueues: TaskCandidateQueue[]
   unassignedTaskIds: string[]
+  safety: SafetySummary
 }
 
 export interface CandidateOption {
@@ -56,7 +70,10 @@ export type ResponseStatus = 'pending' | 'accepted' | 'declined'
 export type RequesterDemoStage =
   | 'form'
   | 'matching'
+  | 'review_required'
   | 'matched'
   | 'partially_matched'
   | 'unmatched'
+  | 'emergency'
+  | 'safety_excluded'
   | 'failed'
